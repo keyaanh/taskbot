@@ -1,3 +1,5 @@
 node_modules
 .env
 dist
+client/src/components/ui/.vite
+client/.vite

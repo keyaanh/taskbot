@@ -66,7 +66,7 @@ async def extract_facts(messages: list) -> List[str]:
         get_client().messages.create,
         model="claude-haiku-4-5-20251001",
         max_tokens=300,
-        temperature=0,
+        temperature=0.3,
         messages=[{"role": "user", "content": (
             "Extract permanent facts about the user as a person (name, job, skills, background). "
             "Do NOT include task-specific things like 'user wants to rewrite X'. "
@@ -87,7 +87,7 @@ async def generate_summary(messages: list) -> str:
         get_client().messages.create,
         model="claude-haiku-4-5-20251001",
         max_tokens=150,
-        temperature=0,
+        temperature=0.3,
         messages=[{"role": "user", "content": f"Summarize in exactly 3 plain English sentences:\n\n{text}"}],
     )
     return resp.content[0].text.strip()
