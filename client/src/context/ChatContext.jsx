@@ -25,6 +25,7 @@ export function ChatProvider({ children }) {
     try {
       const r = await fetch(`${API}/chats/${id}/messages`);
       const d = await r.json();
+      if (Array.isArray(d) && d.length) console.log('[DEBUG] first message from API:', JSON.stringify(d[0]));
       setMessages(Array.isArray(d) ? d : []);
       setActiveId(id);
       activeIdRef.current = id;
@@ -73,21 +74,23 @@ export function ChatProvider({ children }) {
     const uid = `u-${Date.now()}`;
     const aid = `a-${Date.now() + 1}`;
 
-    const userMsg = {
-      id: uid, role: 'user', content,
-      quoted_text: quoted_text || null,
-      file_name: fileData?.name || null,
-      _fileData: fileData || null,   // kept in memory for follow-up messages
-      created_at: new Date().toISOString(),
-    };
-    const aiMsg = { id: aid, role: 'assistant', content: '', created_at: new Date().toISOString() };
-
-    setMessages(prev => [...prev, userMsg, aiMsg]);
-    setStreaming(true);
-
     try {
+      // Ensure a chat exists BEFORE adding optimistic messages so newChat()'s
+      // setMessages([]) doesn't wipe the optimistic state.
       let cid = activeIdRef.current;
       if (!cid) cid = await newChat();
+
+      const userMsg = {
+        id: uid, role: 'user', content,
+        quoted_text: quoted_text || null,
+        file_name: fileData?.name || null,
+        _fileData: fileData || null,
+        created_at: new Date().toISOString(),
+      };
+      const aiMsg = { id: aid, role: 'assistant', content: '', created_at: new Date().toISOString() };
+
+      setMessages(prev => [...prev, userMsg, aiMsg]);
+      setStreaming(true);
 
       // history is plain text — document context is stored in DB and injected server-side
       const history = (currentMessages || [])

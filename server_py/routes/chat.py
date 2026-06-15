@@ -73,6 +73,10 @@ async def send_message(body: dict):
                     pass
 
         if chat_id:
+            # ensure the chat row exists (stale activeId on client can point to a deleted chat)
+            exists = db.table("chats").select("id").eq("id", chat_id).execute()
+            if not exists.data:
+                db.table("chats").insert({"id": chat_id, "title": content[:45] or "New Chat"}).execute()
             saved_content = content or f"[File: {file.get('name', 'attachment')}]"
             db.table("messages").insert([
                 {"chat_id": chat_id, "role": "user", "content": saved_content, "quoted_text": quoted_text},
@@ -99,7 +103,11 @@ def create_chat():
 @router.get("/{chat_id}/messages")
 def get_messages(chat_id: str):
     res = get_db().table("messages").select("*").eq("chat_id", chat_id).order("created_at").execute()
-    return res.data or []
+    data = res.data or []
+    if data:
+        first = data[0]
+        print(f"[DEBUG] first message: id={first.get('id')} role={first.get('role')} content_type={type(first.get('content')).__name__} content_preview={str(first.get('content'))[:80]}")
+    return data
 
 @router.delete("/{chat_id}")
 def delete_chat(chat_id: str):

@@ -19,6 +19,29 @@ async def stream_chat(messages: list, system: str, mode: str = None):
     """Async generator yielding SSE lines. Last item is a JSON with token count."""
     queue = asyncio.Queue()
 
+    def run_search():
+        """Streaming path for web search — SDK handles tool loop, we stream text deltas."""
+        try:
+            with get_client().messages.stream(
+                model="claude-sonnet-4-6",
+                max_tokens=2048,
+                system=system,
+                messages=messages[-20:],
+                tools=[{"type": "web_search_20250305", "name": "web_search"}],
+            ) as stream:
+                for event in stream:
+                    if event.type == "content_block_delta" and hasattr(event.delta, "text"):
+                        queue.put_nowait(json.dumps({"text": event.delta.text}))
+
+                final = stream.get_final_message()
+                tokens = final.usage.output_tokens if final.usage else 0
+                queue.put_nowait(json.dumps({"done": True, "tokens": tokens}))
+        except Exception as e:
+            queue.put_nowait(json.dumps({"error": str(e)}))
+            queue.put_nowait(json.dumps({"done": True, "tokens": 0}))
+        finally:
+            queue.put_nowait(None)
+
     def run_stream():
         try:
             kwargs = dict(
@@ -48,7 +71,7 @@ async def stream_chat(messages: list, system: str, mode: str = None):
             queue.put_nowait(None)
 
     loop = asyncio.get_event_loop()
-    loop.run_in_executor(None, run_stream)
+    loop.run_in_executor(None, run_search if mode == "search" else run_stream)
 
     while True:
         item = await queue.get()
@@ -75,7 +98,8 @@ async def extract_facts(messages: list) -> List[str]:
     )
     try:
         import re
-        match = re.search(r'\[.*?\]', resp.content[0].text, re.DOTALL)
+        text = "".join(block.text for block in resp.content if block.type == "text")
+        match = re.search(r'\[.*?\]', text, re.DOTALL)
         return json.loads(match.group()) if match else []
     except Exception:
         return []
@@ -90,4 +114,4 @@ async def generate_summary(messages: list) -> str:
         temperature=0.3,
         messages=[{"role": "user", "content": f"Summarize in exactly 3 plain English sentences:\n\n{text}"}],
     )
-    return resp.content[0].text.strip()
+    return "".join(block.text for block in resp.content if block.type == "text").strip()
