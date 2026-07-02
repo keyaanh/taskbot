@@ -25,8 +25,7 @@ export function ChatProvider({ children }) {
     try {
       const r = await fetch(`${API}/chats/${id}/messages`);
       const d = await r.json();
-      if (Array.isArray(d) && d.length) console.log('[DEBUG] first message from API:', JSON.stringify(d[0]));
-      setMessages(Array.isArray(d) ? d : []);
+setMessages(Array.isArray(d) ? d : []);
       setActiveId(id);
       activeIdRef.current = id;
     } catch {}
@@ -40,18 +39,12 @@ export function ChatProvider({ children }) {
     } catch {}
   }, []);
 
-  const newChat = useCallback(async () => {
-    const r = await fetch(`${API}/chats/create`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}',
-    });
-    if (!r.ok) throw new Error(`Failed to create chat: ${r.status}`);
-    const chat = await r.json();
-    if (!chat?.id) throw new Error('Invalid chat response');
-    setChats(prev => [chat, ...prev]);
+  // Resets UI to a blank slate — does NOT create a DB record yet.
+  // The record is created lazily on first send (see sendMessage below).
+  const newChat = useCallback(() => {
     setMessages([]);
-    setActiveId(chat.id);
-    activeIdRef.current = chat.id;
-    return chat.id;
+    setActiveId(null);
+    activeIdRef.current = null;
   }, []);
 
   const deleteChat = useCallback(async (id) => {
@@ -68,17 +61,25 @@ export function ChatProvider({ children }) {
     setMemory(prev => prev.filter(m => m.id !== id));
   }, []);
 
-  const sendMessage = useCallback(async (content, quoted_text, currentMessages, fileData, mode) => {
+  const sendMessage = useCallback(async (content, quoted_text, currentMessages, fileData, mode, model) => {
     setError(null);
 
     const uid = `u-${Date.now()}`;
     const aid = `a-${Date.now() + 1}`;
 
     try {
-      // Ensure a chat exists BEFORE adding optimistic messages so newChat()'s
-      // setMessages([]) doesn't wipe the optimistic state.
+      // Lazy chat creation — generate the id client-side and let the backend
+      // insert the row only after a real exchange completes (chat.py:
+      // send_message only inserts once full_content is non-empty). No
+      // network round trip up front means no empty row can ever be created
+      // by opening a new chat and not finishing it.
       let cid = activeIdRef.current;
-      if (!cid) cid = await newChat();
+      const isNewChat = !cid;
+      if (isNewChat) {
+        cid = crypto.randomUUID();
+        setActiveId(cid);
+        activeIdRef.current = cid;
+      }
 
       const userMsg = {
         id: uid, role: 'user', content,
@@ -109,7 +110,8 @@ export function ChatProvider({ children }) {
           chat_id: cid,
           quoted_text: quoted_text || undefined,
           file: fileData || undefined,
-          mode: mode || undefined,
+          mode:  mode  || undefined,
+          model: model || undefined,
         }),
         signal: controller.signal,
       });
@@ -139,12 +141,34 @@ export function ChatProvider({ children }) {
             full += p.text;
             setMessages(prev => prev.map(m => m.id === aid ? { ...m, content: full } : m));
           }
+          if (p?.sources) {
+            setMessages(prev => prev.map(m => m.id === aid ? { ...m, sources: p.sources } : m));
+          }
+          if (p?.tool_call) {
+            setMessages(prev => prev.map(m => m.id === aid
+              ? { ...m, tool_calls: [...(m.tool_calls || []), p.tool_call] }
+              : m));
+          }
+          if (p?.tool_result) {
+            setMessages(prev => prev.map(m => m.id === aid
+              ? { ...m, tool_calls: (m.tool_calls || []).map(c =>
+                  (c.name === p.tool_result.name && c.result === undefined) ? { ...c, result: p.tool_result.result } : c) }
+              : m));
+          }
         }
       }
 
-      setChats(prev => prev.map(c =>
-        c.id === cid && c.title === 'New Chat' ? { ...c, title: content.slice(0, 45) || (fileData?.name || 'File') } : c
-      ));
+      // Only now — after the model actually replied (full non-empty) — does
+      // the chat row exist server-side (chat.py's lazy insert requires
+      // full_content). Mirror that in the sidebar: no reply, no entry.
+      if (full) {
+        const title = (content || fileData?.name || 'File').slice(0, 45) || 'New Chat';
+        if (isNewChat) {
+          setChats(prev => [{ id: cid, title, created_at: new Date().toISOString(), updated_at: new Date().toISOString() }, ...prev]);
+        } else {
+          setChats(prev => prev.map(c => c.id === cid ? { ...c, title } : c));
+        }
+      }
       fetch(`${API}/chats/${cid}/title`, {
         method: 'PATCH', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ title: (content || fileData?.name || 'File').slice(0, 45) }),
@@ -163,7 +187,7 @@ export function ChatProvider({ children }) {
       setStreaming(false);
       abortRef.current = null;
     }
-  }, [newChat, loadMemory]);
+  }, [loadMemory]);
 
   const stopStreaming = useCallback(() => { abortRef.current?.abort(); setStreaming(false); }, []);
 
@@ -182,7 +206,7 @@ export function ChatProvider({ children }) {
   }, [chats, messages]);
 
   return (
-    <Ctx.Provider value={{ chats, activeId, messages, memory, streaming, error, loadChats, loadMessages, loadMemory, newChat, deleteChat, deleteMemory, sendMessage, stopStreaming, getSummary, exportChat }}>
+    <Ctx.Provider value={{ chats, activeId, messages, setMessages, memory, streaming, error, loadChats, loadMessages, loadMemory, newChat, deleteChat, deleteMemory, sendMessage, stopStreaming, getSummary, exportChat }}>
       {children}
     </Ctx.Provider>
   );

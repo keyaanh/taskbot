@@ -1,6 +1,55 @@
 import React from "react";
-import { ArrowUp, Paperclip, Square, X, Mic, Globe, BrainCog, FolderCode, Check, StopCircle } from "lucide-react";
+import { ArrowUp, Paperclip, Square, X, Mic, Globe, BrainCog, FolderCode, Check, StopCircle, ChevronDown } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
+
+const API = import.meta.env.VITE_API_URL || "http://localhost:3001/api";
+
+// ── Model selector ────────────────────────────────────────────────────────────
+function ModelSelector() {
+  const [models,  setModels]  = React.useState([]);
+  const [open,    setOpen]    = React.useState(false);
+  const [current, setCurrent] = React.useState(
+    () => localStorage.getItem("tb-model") || "claude-sonnet-4-6"
+  );
+
+  React.useEffect(() => {
+    fetch(`${API}/keys/models`)
+      .then(r => r.json())
+      .then(d => { if (Array.isArray(d)) setModels(d); })
+      .catch(() => {});
+  }, []);
+
+  const select = (id) => {
+    setCurrent(id);
+    localStorage.setItem("tb-model", id);
+    setOpen(false);
+  };
+
+  const label = models.find(m => m.id === current)?.label || current.split("-").slice(0, 3).join(" ");
+
+  return (
+    <div style={{ position: "relative" }}>
+      <button type="button" onClick={() => setOpen(o => !o)}
+        style={{ display: "flex", alignItems: "center", gap: 4, padding: "3px 8px", borderRadius: 20, background: "var(--surface2)", border: "1px solid var(--border)", color: "var(--text-sub)", fontSize: 11, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" }}>
+        {label} <ChevronDown size={10} />
+      </button>
+      {open && (
+        <div style={{ position: "absolute", bottom: "calc(100% + 6px)", left: 0, background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 10, padding: 6, minWidth: 200, zIndex: 50, boxShadow: "0 8px 24px rgba(0,0,0,0.3)" }}>
+          {models.length === 0 && (
+            <p style={{ fontSize: 12, color: "var(--text-faint)", padding: "6px 8px", margin: 0 }}>Loading…</p>
+          )}
+          {models.map(m => (
+            <button key={m.id} onClick={() => select(m.id)}
+              style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between", padding: "7px 10px", borderRadius: 7, background: m.id === current ? "var(--surface)" : "none", border: "none", cursor: "pointer", color: "var(--text)", fontSize: 12, fontFamily: "inherit", textAlign: "left" }}>
+              <span>{m.label}</span>
+              {m.id === current && <Check size={12} style={{ color: "var(--gold)", flexShrink: 0 }} />}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 const ModeBtn = ({ active, onClick, color, icon: Icon, label }) => (
   <button type="button" onClick={onClick}
@@ -84,7 +133,7 @@ export const PromptInputBox = React.forwardRef(({
     if (!t && !file) return;
     const mode = showThink ? "think" : showSearch ? "search" : null;
     onSend(t, quote, mode);
-    setShowSearch(false); setShowThink(false); setShowCanvas(false);
+    // modes are sticky — do NOT reset them here; user turns them off manually
   };
 
   const onKeyDown = e => {
@@ -168,8 +217,10 @@ export const PromptInputBox = React.forwardRef(({
         {/* Actions row */}
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", paddingTop: 10 }}>
 
-          {/* Left: file + mode toggles */}
+          {/* Left: model selector + file + mode toggles */}
           <div style={{ display: "flex", alignItems: "center", gap: 2 }}>
+            <ModelSelector />
+            <Divider />
             <button onClick={() => uploadRef.current?.click()}
               style={{ width: 30, height: 30, borderRadius: "50%", background: "none", border: "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text-sub)", transition: "color 0.15s" }}
               onMouseEnter={e => e.currentTarget.style.color = "var(--text)"}

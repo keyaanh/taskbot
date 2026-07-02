@@ -29,7 +29,7 @@ function AIAvatar({ loading }) {
 }
 
 export default function ChatWindow() {
-  const { messages, streaming, error, sendMessage, stopStreaming } = useChat();
+  const { messages, streaming, error, sendMessage, stopStreaming, setMessages } = useChat();
   const [quote, setQuote] = useState('');
   const [text, setText] = useState('');
   const [file, setFile] = useState(null);
@@ -66,6 +66,16 @@ export default function ChatWindow() {
     prevLen.current = curr;
   }, [messages.length]);
 
+  // Called by MessageBubble when user saves an inline edit.
+  // Truncates the conversation at that message and immediately resends.
+  const handleEdit = (msgId, newContent) => {
+    const idx = messagesRef.current.findIndex(m => m.id === msgId);
+    const truncated = idx !== -1 ? messagesRef.current.slice(0, idx) : messagesRef.current;
+    setMessages(truncated);
+    const model = localStorage.getItem('tb-model') || undefined;
+    sendMessage(newContent, null, truncated, null, null, model);
+  };
+
   const handleSend = async (content, q, mode) => {
     let fileData = null;
     if (file) {
@@ -76,7 +86,8 @@ export default function ChatWindow() {
         if (r.ok) fileData = await r.json();
       } catch {}
     }
-    sendMessage(content, q, messagesRef.current, fileData, mode);
+    const model = localStorage.getItem('tb-model') || undefined;
+    sendMessage(content, q, messagesRef.current, fileData, mode, model);
     setFile(null);
     setText('');
   };
@@ -116,7 +127,7 @@ export default function ChatWindow() {
         <div style={{ maxWidth: 700, margin: '0 auto', padding: '40px 24px 16px' }}>
           {messages.map(m => (
             <MessageBubble key={m.id} msg={m} onQuote={setQuote}
-              onEdit={t => setText(t)}
+              onEdit={handleEdit}
               streaming={streaming && m.id === lastMsg?.id} />
           ))}
           {error && (
